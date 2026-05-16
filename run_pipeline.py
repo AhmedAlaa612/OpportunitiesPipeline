@@ -20,7 +20,7 @@ import time
 import extract
 import embed
 from scrapers.opportunitiescorners import OpportunitiesCornersScraper
-from scrapers.opportunities4u import Opportunities4uScraper
+from scrapers.opportunities4u import Opportunit4UScraper
 from scrapers.opportunitiesforafricans import OpportunitiesForAfricansScraper
 # from scrapers.mysource import MySourceScraper  # ← add new scrapers here
 
@@ -35,7 +35,7 @@ logger = logging.getLogger("pipeline")
 # Each scraper runs independently and tracks its own last-scraped date.
 SCRAPERS = [
     OpportunitiesCornersScraper(),
-    Opportunities4uScraper(),
+    Opportunit4UScraper(),
     OpportunitiesForAfricansScraper(),
     # MySourceScraper(),
 ]
