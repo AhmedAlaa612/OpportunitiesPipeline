@@ -44,10 +44,6 @@ class OpportunitiesCornersScraper(BaseScraper):
         return cards
 
     def _find_latest_section(self, soup: BeautifulSoup):
-        """
-        Locate the 'Latest Opportunities' block by its visible heading text
-        rather than a hardcoded CSS id/class that can change with theme updates.
-        """
         heading = soup.find(
             lambda tag: tag.name in ("h2", "h3", "h4", "h5", "span", "div", "p")
             and "LATEST OPPORTUNITIES" in tag.get_text(strip=True).upper()
@@ -57,24 +53,20 @@ class OpportunitiesCornersScraper(BaseScraper):
             logger.warning("Could not find 'LATEST OPPORTUNITIES' heading — falling back to full page")
             return soup
 
-        container = heading
-        for _ in range(6):
-            parent = container.parent
-            if not parent:
-                break
-            article_children = parent.find_all(
-                lambda tag: tag.name == "div"
-                and ("td_module" in " ".join(tag.get("class", [])))
-            )
-            if article_children:
-                logger.info(
-                    "Found section with %d cards (tag=%s, id=%s)",
-                    len(article_children),
-                    parent.name,
-                    parent.get("id", ""),
-                )
-                return parent
-            container = parent
+        # The cards live in the sibling .td_block_inner div,
+        # not in an ancestor — walk siblings, not parents
+        title_wrap = heading.find_parent("div", class_="td-block-title-wrap")
+        if title_wrap:
+            block_inner = title_wrap.find_next_sibling("div", class_="td_block_inner")
+            if block_inner:
+                logger.info("Found td_block_inner via sibling of td-block-title-wrap")
+                return block_inner
+
+        # Fallback: look for the nearest td_block_inner after the heading
+        block_inner = heading.find_next("div", class_="td_block_inner")
+        if block_inner:
+            logger.info("Found td_block_inner via find_next fallback")
+            return block_inner
 
         logger.warning("Could not isolate section container — using heading's parent")
         return heading.parent
