@@ -44,32 +44,26 @@ class OpportunitiesCornersScraper(BaseScraper):
         return cards
 
     def _find_latest_section(self, soup: BeautifulSoup):
-        heading = soup.find(
-            lambda tag: tag.name in ("h2", "h3", "h4", "h5", "span", "div", "p")
-            and "LATEST OPPORTUNITIES" in tag.get_text(strip=True).upper()
+        # The heading span text won't match string= directly, so find the span first
+        heading_span = soup.find(
+            "span", string=lambda t: t and "LATEST OPPORTUNITIES" in t.upper()
         )
-
-        if not heading:
-            logger.warning("Could not find 'LATEST OPPORTUNITIES' heading — falling back to full page")
+        if not heading_span:
+            logger.warning("Could not find heading span — falling back to full page")
             return soup
 
-        # The cards live in the sibling .td_block_inner div,
-        # not in an ancestor — walk siblings, not parents
-        title_wrap = heading.find_parent("div", class_="td-block-title-wrap")
-        if title_wrap:
-            block_inner = title_wrap.find_next_sibling("div", class_="td_block_inner")
-            if block_inner:
-                logger.info("Found td_block_inner via sibling of td-block-title-wrap")
-                return block_inner
+        block_wrap = heading_span.find_parent(class_=re.compile(r"td_block_wrap"))
+        if not block_wrap:
+            logger.warning("Could not find td_block_wrap — falling back to full page")
+            return soup
 
-        # Fallback: look for the nearest td_block_inner after the heading
-        block_inner = heading.find_next("div", class_="td_block_inner")
-        if block_inner:
-            logger.info("Found td_block_inner via find_next fallback")
-            return block_inner
+        block_inner = block_wrap.find("div", class_="td_block_inner")
+        if not block_inner:
+            logger.warning("Could not find td_block_inner — falling back to full page")
+            return soup
 
-        logger.warning("Could not isolate section container — using heading's parent")
-        return heading.parent
+        logger.info("Found td_block_inner")
+        return block_inner
 
     def _parse_opportunity_cards(self, section) -> List[Dict]:
         """Extract title, url, and datetime from each card in the section."""
