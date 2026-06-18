@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+
+# Env / secrets
+.env
+*.env
+
+# Local-only backfill scripts (contain hardcoded credentials)
+backfill.py
+backfill2.py
+
+# Claude Code
+.claude/
+
+# Pipeline output (local artefacts, not source)
+output/
+latest_opportunities.csv
+opportunities_en.json
