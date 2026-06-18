@@ -71,6 +71,7 @@ def deadline_to_ts(deadline_str: str | None) -> float | None:
         return None
 
 
+
 def build_exam_scores(lang_reqs):
     """Convert language_requirements dict → nested exam_scores list."""
     if not lang_reqs or not isinstance(lang_reqs, dict):
@@ -148,6 +149,7 @@ def run() -> bool:
         dl_ts = deadline_to_ts(deadline_str)
         today_ts = deadline_to_ts(date.today().isoformat())
         is_active = (dl_ts is None) or (dl_ts >= today_ts)
+
 
         payload = {
             "program_id": s["id"],

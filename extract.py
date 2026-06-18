@@ -342,6 +342,7 @@ def translate_to_arabic(data_en: Dict[str, Any]) -> Dict[str, Any]:
 
 REQUIRED_FIELDS = ["title", "description", "application_link", "type", "target_segment"]
 
+<<<<<<< HEAD
 VALID_SUBTYPES = {
     "masters", "bachelor", "phd", "internship", "fellowship",
     "conference", "exchange", "summer_school", "workshop",
@@ -350,6 +351,8 @@ VALID_SUBTYPES = {
 DEGREE_SUBTYPES = {"masters", "bachelor", "phd"}
 VALID_CATEGORIES = {"academic", "non_academic"}
 
+=======
+>>>>>>> 44a681cb310a42378f4be4c02da96f9aaee760f6
 
 def quality_check(data: Dict[str, Any], filename: str) -> List[str]:
     """
@@ -367,6 +370,7 @@ def quality_check(data: Dict[str, Any], filename: str) -> List[str]:
     if data.get("open_to_egyptians") is not True:
         issues.append("not open to egyptians")
 
+<<<<<<< HEAD
     # Category + subtype validation
     type_info = data.get("type") or {}
     category = type_info.get("category")
@@ -390,6 +394,8 @@ def quality_check(data: Dict[str, Any], filename: str) -> List[str]:
             "category=academic but subtype=internship with no degree level — likely non_academic"
         )
 
+=======
+>>>>>>> 44a681cb310a42378f4be4c02da96f9aaee760f6
     # Description sanity
     desc = data.get("description", "")
     banned_openers = [
@@ -571,10 +577,13 @@ def run() -> bool:
                 if "missing required field" in i
                 or "application_link" in i
                 or "not open to egyptians" in i
+<<<<<<< HEAD
                 or "invalid category" in i
                 or "invalid subtype value" in i
                 or "category=non_academic but subtype contains degree" in i
                 or "category=academic but subtype=internship" in i
+=======
+>>>>>>> 44a681cb310a42378f4be4c02da96f9aaee760f6
             ]
             if blocking:
                 logger.warning("  BLOCKED by %d quality issue(s) — skipping", len(blocking))
