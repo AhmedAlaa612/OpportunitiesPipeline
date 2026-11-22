@@ -19,21 +19,32 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import psycopg2
-from psycopg2.extras import Json
 from openai import OpenAI
 
-from countries import normalize_country, normalize_countries
-from config import (
-    DB_CONFIG,
-    GROQ_API_KEY,
-    CEREBRAS_API_KEY,
-    LLM_MODEL_GROQ,
-    LLM_MODEL_CEREBRAS,
-    OUTPUT_DIR,
-    SOURCE_META_PATH,
-    OPPORTUNITIES_JSON,
-)
+try:
+    from .countries import normalize_countries
+    from .config import (
+        GROQ_API_KEY,
+        CEREBRAS_API_KEY,
+        LLM_MODEL_GROQ,
+        LLM_MODEL_CEREBRAS,
+        OUTPUT_DIR,
+        SOURCE_META_PATH,
+        OPPORTUNITIES_JSON,
+    )
+    from .helpers.db import upsert_opportunity
+except ImportError:
+    from countries import normalize_countries
+    from config import (
+        GROQ_API_KEY,
+        CEREBRAS_API_KEY,
+        LLM_MODEL_GROQ,
+        LLM_MODEL_CEREBRAS,
+        OUTPUT_DIR,
+        SOURCE_META_PATH,
+        OPPORTUNITIES_JSON,
+    )
+    from helpers.db import upsert_opportunity
 
 logger = logging.getLogger(__name__)
 
@@ -448,18 +459,6 @@ def normalize_opp_countries(data: dict):
 # DB helpers
 # ═══════════════════════════════════════════════════════════════════════
 
-def ensure_list(val):
-    if val is None:
-        return None
-    return [val] if isinstance(val, str) else list(val)
-
-
-def parse_date(val):
-    if not val or not isinstance(val, str):
-        return None
-    return val if re.match(r"^\d{4}-\d{2}-\d{2}$", val) else None
-
-
 def save_to_db(
     opportunity_id: str,
     data_en: dict,
@@ -469,61 +468,14 @@ def save_to_db(
     source_md: str = None,
 ):
     normalize_opp_countries(data_en)
-
-    conn = psycopg2.connect(**DB_CONFIG)
-    cur = conn.cursor()
-    now = datetime.now(timezone.utc)
-
-    type_info = data_en.get("type") or {}
-    cur.execute(
-        """
-        INSERT INTO opportunities (
-            id, source, source_url, source_md,
-            data_en, data_ar,
-            category, subtype, country, fund_type, target_segment,
-            deadline, is_remote, open_to_egyptians,
-            created_at, updated_at
-        )
-        VALUES (
-            %s::uuid, %s, %s, %s,
-            %s, %s,
-            %s, %s, %s, %s, %s,
-            %s, %s, %s,
-            %s, %s
-        )
-        ON CONFLICT (id) DO UPDATE SET
-            source = EXCLUDED.source,
-            source_url = EXCLUDED.source_url,
-            source_md = EXCLUDED.source_md,
-            data_en = EXCLUDED.data_en,
-            data_ar = EXCLUDED.data_ar,
-            category = EXCLUDED.category,
-            subtype = EXCLUDED.subtype,
-            country = EXCLUDED.country,
-            fund_type = EXCLUDED.fund_type,
-            target_segment = EXCLUDED.target_segment,
-            deadline = EXCLUDED.deadline,
-            is_remote = EXCLUDED.is_remote,
-            open_to_egyptians = EXCLUDED.open_to_egyptians,
-            updated_at = EXCLUDED.updated_at;
-        """,
-        (
-            opportunity_id, source, source_url, source_md,
-            Json(data_en), Json(data_ar),
-            type_info.get("category"),
-            ensure_list(type_info.get("subtype")),
-            ensure_list(data_en.get("country")),
-            ensure_list(data_en.get("fund_type")),
-            ensure_list(data_en.get("target_segment")),
-            parse_date(data_en.get("deadline")),
-            bool(data_en.get("is_remote", False)),
-            True,  # only reaches DB if quality gate passed open_to_egyptians check
-            now, now,
-        ),
+    upsert_opportunity(
+        opportunity_id=opportunity_id,
+        data_en=data_en,
+        data_ar=data_ar,
+        source=source,
+        source_url=source_url,
+        source_md=source_md,
     )
-    conn.commit()
-    cur.close()
-    conn.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════

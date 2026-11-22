@@ -13,16 +13,10 @@ Adding a new scraper:
     2. Import it here and add to SCRAPERS list below
 """
 
+import argparse
 import logging
 import sys
 import time
-
-import extract
-import embed
-from scrapers.opportunitiescorners import OpportunitiesCornersScraper
-from scrapers.opportunities4u import Opportunit4UScraper
-from scrapers.opportunitiesforafricans import OpportunitiesForAfricansScraper
-# from scrapers.mysource import MySourceScraper  # ← add new scrapers here
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,20 +25,25 @@ logging.basicConfig(
 logger = logging.getLogger("pipeline")
 
 
-# ── Register scrapers ──────────────────────────────────────────────────
-# Each scraper runs independently and tracks its own last-scraped date.
-SCRAPERS = [
-    OpportunitiesCornersScraper(),
-    Opportunit4UScraper(),
-    OpportunitiesForAfricansScraper(),
-    # MySourceScraper(),
-]
-
-
 def run_scrape() -> bool:
     """Run all registered scrapers. Returns True if any produced new data."""
+    try:
+        from .scrapers.opportunitiescorners import OpportunitiesCornersScraper
+        from .scrapers.opportunities4u import Opportunit4UScraper
+        from .scrapers.opportunitiesforafricans import OpportunitiesForAfricansScraper
+    except ImportError:
+        from scrapers.opportunitiescorners import OpportunitiesCornersScraper
+        from scrapers.opportunities4u import Opportunit4UScraper
+        from scrapers.opportunitiesforafricans import OpportunitiesForAfricansScraper
+
+    scrapers = [
+        OpportunitiesCornersScraper(),
+        Opportunit4UScraper(),
+        OpportunitiesForAfricansScraper(),
+        # Add new scraper instances here.
+    ]
     any_new = False
-    for scraper in SCRAPERS:
+    for scraper in scrapers:
         logger.info("=== Scraper: %s ===", scraper.source_name)
         try:
             had_work = scraper.run()
@@ -55,15 +54,34 @@ def run_scrape() -> bool:
     return any_new
 
 
+def run_extract() -> bool:
+    try:
+        from . import extract
+    except ImportError:
+        import extract
+    return extract.run()
+
+
+def run_embed() -> bool:
+    try:
+        from . import embed
+    except ImportError:
+        import embed
+    return embed.run()
+
+
 STEPS = {
     "scrape": run_scrape,
-    "extract": extract.run,
-    "embed": embed.run,
+    "extract": run_extract,
+    "embed": run_embed,
 }
 
 
-def main():
-    requested = sys.argv[1:] if len(sys.argv) > 1 else list(STEPS.keys())
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Run the opportunities ingestion pipeline.")
+    parser.add_argument("steps", nargs="*", help="Pipeline steps: scrape, extract, embed")
+    args = parser.parse_args(argv)
+    requested = args.steps if args.steps else list(STEPS.keys())
 
     for step_name in requested:
         if step_name not in STEPS:

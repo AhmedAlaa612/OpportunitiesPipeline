@@ -16,19 +16,32 @@ import requests as http_requests
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 
-from countries import normalize_countries
-
-from config import (
-    JINA_API_KEY,
-    JINA_ENDPOINT,
-    JINA_MODEL,
-    EMBED_BATCH_SIZE,
-    QDRANT_ENDPOINT,
-    QDRANT_API_KEY,
-    QDRANT_COLLECTION,
-    UPSERT_BATCH_SIZE,
-    OPPORTUNITIES_JSON,
-)
+try:
+    from .config import (
+        JINA_API_KEY,
+        JINA_ENDPOINT,
+        JINA_MODEL,
+        EMBED_BATCH_SIZE,
+        QDRANT_ENDPOINT,
+        QDRANT_API_KEY,
+        QDRANT_COLLECTION,
+        UPSERT_BATCH_SIZE,
+        OPPORTUNITIES_JSON,
+    )
+    from .countries import normalize_countries
+except ImportError:
+    from config import (
+        JINA_API_KEY,
+        JINA_ENDPOINT,
+        JINA_MODEL,
+        EMBED_BATCH_SIZE,
+        QDRANT_ENDPOINT,
+        QDRANT_API_KEY,
+        QDRANT_COLLECTION,
+        UPSERT_BATCH_SIZE,
+        OPPORTUNITIES_JSON,
+    )
+    from countries import normalize_countries
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +98,85 @@ def build_exam_scores(lang_reqs):
     return scores
 
 
+def build_qdrant_point(opp_en: dict, embedding: np.ndarray) -> PointStruct:
+    countries = ensure_list(opp_en.get("country"))
+    fund_types = ensure_list(opp_en.get("fund_type"))
+    type_info = opp_en.get("type") or {}
+    subtypes = ensure_list(type_info.get("subtype"))
+    target_segments = ensure_list(opp_en.get("target_segment"))
+    documents_required = ensure_list(opp_en.get("documents_required"))
+    application_fee = opp_en.get("application_fee")
+    exam_scores = build_exam_scores(opp_en.get("language_requirements"))
+
+    deadline_str = opp_en.get("deadline")
+    deadline_ts = deadline_to_ts(deadline_str)
+    today_ts = deadline_to_ts(date.today().isoformat())
+    is_active = bool(opp_en.get("is_active", True)) and (
+        deadline_ts is None or deadline_ts >= today_ts
+    )
+
+    payload = {
+        "program_id": opp_en["id"],
+        "title": opp_en.get("title"),
+        "country": countries,
+        "fund_type": fund_types,
+        "category": type_info.get("category"),
+        "subtype": subtypes,
+        "documents_required": documents_required,
+        "exam_scores": exam_scores,
+        "is_remote": opp_en.get("is_remote", False),
+        "target_segment": target_segments,
+        "deadline": deadline_str,
+        "deadline_ts": deadline_ts,
+        "is_active": is_active,
+        "gpa": float(opp_en["gpa"]) if opp_en.get("gpa") is not None else None,
+        "has_language_requirements": len(exam_scores) > 0,
+        "has_fee": bool(application_fee),
+        "has_document_requirements": bool(documents_required),
+    }
+    return PointStruct(id=opp_en["id"], vector=embedding, payload=payload)
+
+
+def embed_and_upsert(opportunities: list[dict]) -> int:
+    """Embed in-memory opportunities and upsert their points to Qdrant."""
+    if not opportunities:
+        return 0
+
+    rich_texts = []
+    for opportunity in opportunities:
+        if opportunity.get("country"):
+            raw_country = opportunity["country"]
+            opportunity["country"] = normalize_countries(
+                raw_country if isinstance(raw_country, list) else [raw_country]
+            )
+        rich_texts.append(
+            f"{opportunity.get('title', '')}\n"
+            f"{opportunity.get('description', '')}\n"
+            f"Eligibility: {opportunity.get('eligibility', '')}\n"
+        )
+
+    all_embeddings = []
+    for start in range(0, len(rich_texts), EMBED_BATCH_SIZE):
+        batch = rich_texts[start : start + EMBED_BATCH_SIZE]
+        logger.info("Embedding batch %d–%d / %d", start, start + len(batch), len(rich_texts))
+        all_embeddings.extend(get_jina_embedding(batch))
+        time.sleep(1)
+
+    points = [
+        build_qdrant_point(opportunity, embedding)
+        for opportunity, embedding in zip(opportunities, all_embeddings)
+    ]
+    client = QdrantClient(url=QDRANT_ENDPOINT, api_key=QDRANT_API_KEY)
+    for start in range(0, len(points), UPSERT_BATCH_SIZE):
+        client.upsert(
+            collection_name=QDRANT_COLLECTION,
+            points=points[start : start + UPSERT_BATCH_SIZE],
+        )
+
+    logger.info("Upserted %d points to Qdrant collection '%s'", len(points), QDRANT_COLLECTION)
+    return len(points)
+
+
 # ── Main ───────────────────────────────────────────────────────────────
 
 
@@ -104,83 +196,9 @@ def run() -> bool:
         logger.warning("No opportunities to embed")
         return False
 
-    # ── Prepare texts + metadata ───────────────────────────────────────
-    rich_texts = []
-    opportunity_data = []
-
-    for s in opportunities:
-        # Normalize country names
-        if s.get("country"):
-            raw = s["country"]
-            s["country"] = normalize_countries(raw if isinstance(raw, list) else [raw])
-
-        rich_text = (
-            f"{s.get('title', '')}\n"
-            f"{s.get('description', '')}\n"
-            f"Eligibility: {s.get('eligibility', '')}\n"
-        )
-        rich_texts.append(rich_text)
-        opportunity_data.append(s)
-
-    # ── Batch embed ────────────────────────────────────────────────────
-    all_embeddings = []
-    for i in range(0, len(rich_texts), EMBED_BATCH_SIZE):
-        batch = rich_texts[i : i + EMBED_BATCH_SIZE]
-        logger.info("Embedding batch %d–%d / %d", i, i + len(batch), len(rich_texts))
-        embeddings = get_jina_embedding(batch)
-        all_embeddings.extend(embeddings)
-        time.sleep(1)
-
-    logger.info("Generated %d embeddings", len(all_embeddings))
-
-    # ── Build Qdrant points ────────────────────────────────────────────
-    points = []
-
-    for s, embedding in zip(opportunity_data, all_embeddings):
-        countries = ensure_list(s.get("country"))
-        fund_types = ensure_list(s.get("fund_type"))
-        subtypes = ensure_list(s.get("type", {}).get("subtype"))
-        target_segments = ensure_list(s.get("target_segment"))
-        documents_required = ensure_list(s.get("documents_required"))
-        application_fee = s.get("application_fee")
-        exam_scores = build_exam_scores(s.get("language_requirements"))
-
-        deadline_str = s.get("deadline")
-        dl_ts = deadline_to_ts(deadline_str)
-        today_ts = deadline_to_ts(date.today().isoformat())
-        is_active = (dl_ts is None) or (dl_ts >= today_ts)
-
-
-        payload = {
-            "program_id": s["id"],
-            "title": s.get("title"),
-            "country": countries,
-            "fund_type": fund_types,
-            "category": s.get("type", {}).get("category"),
-            "subtype": subtypes,
-            "documents_required": documents_required,
-            "exam_scores": exam_scores,
-            "is_remote": s.get("is_remote", False),
-            "target_segment": target_segments,
-            "deadline": deadline_str,
-            "deadline_ts": dl_ts,
-            "is_active": is_active,
-            "gpa": float(s["gpa"]) if s.get("gpa") is not None else None,
-            "has_language_requirements": len(exam_scores) > 0,
-            "has_fee": bool(application_fee),
-            "has_document_requirements": bool(documents_required),
-        }
-
-        points.append(PointStruct(id=s["id"], vector=embedding, payload=payload))
-
-    # ── Upsert to Qdrant ──────────────────────────────────────────────
-    client = QdrantClient(url=QDRANT_ENDPOINT, api_key=QDRANT_API_KEY)
-    for i in range(0, len(points), UPSERT_BATCH_SIZE):
-        batch = points[i : i + UPSERT_BATCH_SIZE]
-        client.upsert(collection_name=QDRANT_COLLECTION, points=batch)
-
-    logger.info("Upserted %d points to Qdrant collection '%s'", len(points), QDRANT_COLLECTION)
-    return True
+    count = embed_and_upsert(opportunities)
+    logger.info("Generated and upserted %d opportunity embeddings", count)
+    return count > 0
 
 
 if __name__ == "__main__":

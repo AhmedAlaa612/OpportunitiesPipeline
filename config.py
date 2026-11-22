@@ -16,6 +16,8 @@ OPPORTUNITIES_JSON = PIPELINE_DIR / "opportunities_en.json"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # ── Database ───────────────────────────────────────────────────────────
+FORM_WEBHOOK_SECRET = os.getenv("FORM_WEBHOOK_SECRET")
+
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", os.getenv("db_host")),
     "port": os.getenv("DB_PORT", os.getenv("db_port")),
